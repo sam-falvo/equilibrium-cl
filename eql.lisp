@@ -36,7 +36,7 @@
 (defun main ()
   (sdl2:with-init ()
     (sdl2:with-window (window :w 768 :h 768 :title "Equilibrium/CL" :flags '(:shown))
-      (sdl2:with-renderer (renderer window :flags '(:accelerated))
+      (sdl2:with-renderer (renderer window)
 	(sdl2:with-event-loop ()
 	  (:keyup (:keysym ks)
 		  (when (sdl2:scancode= (sdl2:scancode-value ks) :scancode-escape)
