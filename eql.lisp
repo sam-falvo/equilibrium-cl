@@ -19,10 +19,12 @@
 
 (defparameter *playfield* nil)
 (defparameter *player* nil)
+(defparameter *opponents* nil)
 
 
 (defgeneric paint-with-renderer (p r))
 (defgeneric move-object (p))
+(defgeneric handle-collisions (p))
 
 
 (defclass playfield ()
@@ -40,6 +42,10 @@
   ; playfields are static; we don't bundge.
   (values))
 
+(defmethod handle-collisions ((p playfield))
+  ; playfields have nothing they can collide with.
+  (values))
+
 
 (defclass player ()
   ((left :initarg :left :accessor left)
@@ -48,11 +54,21 @@
    (h :initform 16 :reader h)
    (dx :accessor dx :initform 0)
    (dy :accessor dy :initform 0)
+   (color :reader color :initform '(255 255 255 255))
    (pf :initarg :on-playfield :initform nil :reader playfield-of)))
+
+(defclass opponent (player)
+  ((color :reader color :initform '(0 255 255 255))))
 
 (defmethod initialize-instance :after ((p player) &key)
   (setf (left p) (/ (- (w (playfield-of p)) (w p)) 2))
   (setf (top p)  (/ (- (h (playfield-of p)) (h p)) 2)))
+
+(defmethod initialize-instance :after ((o opponent) &key)
+  (setf (dx o) (- (random 7 *random-state*) 3))
+  (setf (dy o) (- (random 7 *random-state*) 3))
+  (setf (left o) (random (w (playfield-of o)) *random-state*))
+  (setf (top o)  (random (h (playfield-of o)) *random-state*)))
 
 (defun right (p)
   (+ (left p) (w p)))
@@ -64,8 +80,9 @@
   (let ((left (left p))
         (top (top p))
         (right (right p))
-        (bottom (bottom p)))
-    (sdl2:set-render-draw-color r 255 255 255 255)
+        (bottom (bottom p))
+	(color (color p)))
+    (apply #'sdl2:set-render-draw-color (append (list r) color))
     (sdl2:render-draw-line r left top right top)
     (sdl2:render-draw-line r right top right bottom)
     (sdl2:render-draw-line r right bottom left bottom)
@@ -83,54 +100,57 @@
   (setf (top p) (+ (top p) (dy p)))
   (values))
 
+(defmethod handle-collisions ((p player))
+  ; let-block originally intended to help in debugging an issue.
+  ; However, in retrospect, this is better b/c it's faster to run.
+  (let ((player-right (right p))
+        (player-left (left p))
+        (player-top (top p))
+        (player-bottom (bottom p))
+        (field-left 0)
+        (field-right (w (playfield-of p)))
+        (field-top 0)
+        (field-bottom (h (playfield-of p))))
+    (cond ((>= player-right field-right)
+           ; We've exceeded the right edge by N pixels.  Moving back
+           ; by N pixels puts us right on the edge, which isn't realistic.
+           ; Move by another N pixels to properly emulate the reflection
+           ; off the wall.
+           (decf (left p) (* 2 (- player-right field-right)))
+           (h-rebound p))
+          ((< player-left field-left)
+           (incf (left p) (* 2 (- field-left player-left)))
+           (h-rebound p))
+          ((>= player-bottom field-bottom)
+           (decf (top p) (* 2 (- player-bottom field-bottom)))
+           (v-rebound p))
+          ((< player-top field-top)
+           (incf (top p) (* 2 (- field-top player-top)))
+           (v-rebound p))))
+  (values))
+
 
 (defun repaint-playfield (renderer)
   "Use painter's algorithm to redraw the game board."
   (mapcar #'(lambda (obj) (paint-with-renderer obj renderer))
-          (list *playfield* *player*))
+          (append (list *playfield* *player*) *opponents*))
   (values))
 
 
 (defun move-objects ()
   "Update the position of all objects with a non-zero
 velocity vector."
-  (mapcar #'move-object (list *player*)))
+  (mapcar #'move-object (append (list *player*) *opponents*)))
 
 
-(defun handle-collisions ()
-  ; let-block originally intended to help in debugging an issue.
-  ; However, in retrospect, this is better b/c it's faster to run.
-  (let ((player-right (right *player*))
-        (player-left (left *player*))
-        (player-top (top *player*))
-        (player-bottom (bottom *player*))
-        (field-left 0)
-        (field-right (w *playfield*))
-        (field-top 0)
-        (field-bottom (h *playfield*)))
-    (cond ((>= player-right field-right)
-           ; We've exceeded the right edge by N pixels.  Moving back
-           ; by N pixels puts us right on the edge, which isn't realistic.
-           ; Move by another N pixels to properly emulate the reflection
-           ; off the wall.
-           (decf (left *player*) (* 2 (- player-right field-right)))
-           (h-rebound *player*))
-          ((< player-left field-left)
-           (incf (left *player*) (* 2 (- field-left player-left)))
-           (h-rebound *player*))
-          ((>= player-bottom field-bottom)
-           (decf (top *player*) (* 2 (- player-bottom field-bottom)))
-           (v-rebound *player*))
-          ((< player-top field-top)
-           (incf (top *player*) (* 2 (- field-top player-top)))
-           (v-rebound *player*))))
-  (values))
+(defun handle-all-collisions ()
+  (mapcar #'handle-collisions (append (list *player*) *opponents*)))
 
 
 (defun game-loop-iteration (renderer)
   (repaint-playfield renderer)
   (move-objects)
-  (handle-collisions)
+  (handle-all-collisions)
   (values))
 
 
@@ -138,6 +158,11 @@ velocity vector."
   (multiple-value-bind (w h) (sdl2:get-window-size window)
     (setf *playfield* (make-instance 'playfield :w w :h h)))
   (setf *player* (make-instance 'player :on-playfield *playfield*))
+  (setf *opponents*
+        (mapcar
+          #'(lambda (x) (declare (ignore x))
+              (make-instance 'opponent :on-playfield *playfield*))
+          '(1 2 3 4)))
   (values))
 
 
