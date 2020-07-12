@@ -81,7 +81,7 @@
         (top (top p))
         (right (right p))
         (bottom (bottom p))
-	(color (color p)))
+        (color (color p)))
     (apply #'sdl2:set-render-draw-color (append (list r) color))
     (sdl2:render-draw-line r left top right top)
     (sdl2:render-draw-line r right top right bottom)
@@ -140,11 +140,13 @@
 (defun move-objects ()
   "Update the position of all objects with a non-zero
 velocity vector."
-  (mapcar #'move-object (append (list *player*) *opponents*)))
+  (mapcar #'move-object (append (list *player*) *opponents*))
+  (values))
 
 
 (defun handle-all-collisions ()
-  (mapcar #'handle-collisions (append (list *player*) *opponents*)))
+  (mapcar #'handle-collisions (append (list *player*) *opponents*))
+  (values))
 
 
 (defun game-loop-iteration (renderer)
@@ -168,7 +170,8 @@ velocity vector."
 
 (defmacro check-direction (ks key axis fn)
   `(when (sdl2:scancode= (sdl2:scancode-value ,ks)
-                         (intern (format nil "SCANCODE-~A" (string ,key)) "KEYWORD"))
+                         (intern (format nil "SCANCODE-~A" (string ,key))
+                                 "KEYWORD"))
      (setf (,axis *player*) (,fn (,axis *player*)))))
 
 
@@ -184,7 +187,8 @@ velocity vector."
                     (check-direction ks 'a dx 1-)
                     (check-direction ks 'd dx 1+))
           (:keyup (:keysym ks)
-                  (when (sdl2:scancode= (sdl2:scancode-value ks) :scancode-escape)
+                  (when (sdl2:scancode= (sdl2:scancode-value ks)
+                                        :scancode-escape)
                     (sdl2:push-event :quit)))
           (:idle ()
                  (game-loop-iteration renderer)
