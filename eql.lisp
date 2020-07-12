@@ -42,8 +42,8 @@
 
 
 (defclass player ()
-  ((x :initarg :x :accessor x)
-   (y :initarg :y :accessor y)
+  ((left :initarg :left :accessor left)
+   (top :initarg :top :accessor top)
    (w :initform 16 :reader w)
    (h :initform 16 :reader h)
    (dx :accessor dx :initform 0)
@@ -51,16 +51,20 @@
    (pf :initarg :on-playfield :initform nil :reader playfield-of)))
 
 (defmethod initialize-instance :after ((p player) &key)
-  (setf (x p) (/ (w (playfield-of p)) 2))
-  (setf (y p) (/ (h (playfield-of p)) 2)))
+  (setf (left p) (/ (- (w (playfield-of p)) (w p)) 2))
+  (setf (top p)  (/ (- (h (playfield-of p)) (h p)) 2)))
+
+(defun right (p)
+  (+ (left p) (w p)))
+
+(defun bottom (p)
+  (+ (top p) (h p)))
 
 (defmethod paint-with-renderer ((p player) r)
-  (let* ((width (w p))
-         (height (h p))
-         (left (- (x p) (/ width 2)))
-         (top (- (y p) (/ height 2)))
-         (right (+ (x p) (/ width 2)))
-         (bottom (+ (y p) (/ height 2))))
+  (let ((left (left p))
+        (top (top p))
+        (right (right p))
+        (bottom (bottom p)))
     (sdl2:set-render-draw-color r 255 255 255 255)
     (sdl2:render-draw-line r left top right top)
     (sdl2:render-draw-line r right top right bottom)
@@ -68,28 +72,16 @@
     (sdl2:render-draw-line r left bottom left top)
     (values)))
 
-(defmethod move-object ((p player))
-  (setf (x p) (+ (x p) (dx p)))
-  (setf (y p) (+ (y p) (dy p)))
-  (values))
-
 (defun h-rebound (p)
   (setf (dx p) (- (dx p))))
 
 (defun v-rebound (p)
   (setf (dy p) (- (dy p))))
 
-(defun right-border (obj)
-  (+ (x obj) (/ (w obj) 2)))
-
-(defun left-border (obj)
-  (- (x obj) (/ (w obj) 2)))
-
-(defun top-border (obj)
-  (- (y obj) (/ (h obj) 2)))
-
-(defun bottom-border (obj)
-  (+ (y obj) (/ (h obj) 2)))
+(defmethod move-object ((p player))
+  (setf (left p) (+ (left p) (dx p)))
+  (setf (top p) (+ (top p) (dy p)))
+  (values))
 
 
 (defun repaint-playfield (renderer)
@@ -106,14 +98,32 @@ velocity vector."
 
 
 (defun handle-collisions ()
-  (cond ((common-lisp:>= (right-border *player*)  (w *playfield*))
-	 (h-rebound *player*))
-	((common-lisp:<  (left-border *player*)   0)
-	 (h-rebound *player*))
-	((common-lisp:>= (bottom-border *player*) (h *playfield*))
-	 (v-rebound *player*))
-	((common-lisp:<  (top-border *player*)    0)
-	 (v-rebound *player*)))
+  ; let-block originally intended to help in debugging an issue.
+  ; However, in retrospect, this is better b/c it's faster to run.
+  (let ((player-right (right *player*))
+        (player-left (left *player*))
+        (player-top (top *player*))
+        (player-bottom (bottom *player*))
+        (field-left 0)
+        (field-right (w *playfield*))
+        (field-top 0)
+        (field-bottom (h *playfield*)))
+    (cond ((>= player-right field-right)
+           ; We've exceeded the right edge by N pixels.  Moving back
+           ; by N pixels puts us right on the edge, which isn't realistic.
+           ; Move by another N pixels to properly emulate the reflection
+           ; off the wall.
+           (decf (left *player*) (* 2 (- player-right field-right)))
+           (h-rebound *player*))
+          ((< player-left field-left)
+           (incf (left *player*) (* 2 (- field-left player-left)))
+           (h-rebound *player*))
+          ((>= player-bottom field-bottom)
+           (decf (top *player*) (* 2 (- player-bottom field-bottom)))
+           (v-rebound *player*))
+          ((< player-top field-top)
+           (incf (top *player*) (* 2 (- field-top player-top)))
+           (v-rebound *player*))))
   (values))
 
 
