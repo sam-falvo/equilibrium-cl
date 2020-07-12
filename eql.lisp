@@ -73,6 +73,24 @@
   (setf (y p) (+ (y p) (dy p)))
   (values))
 
+(defun h-rebound (p)
+  (setf (dx p) (- (dx p))))
+
+(defun v-rebound (p)
+  (setf (dy p) (- (dy p))))
+
+(defun right-border (obj)
+  (+ (x obj) (/ (w obj) 2)))
+
+(defun left-border (obj)
+  (- (x obj) (/ (w obj) 2)))
+
+(defun top-border (obj)
+  (- (y obj) (/ (h obj) 2)))
+
+(defun bottom-border (obj)
+  (+ (y obj) (/ (h obj) 2)))
+
 
 (defun repaint-playfield (renderer)
   "Use painter's algorithm to redraw the game board."
@@ -87,9 +105,22 @@ velocity vector."
   (mapcar #'move-object (list *player*)))
 
 
+(defun handle-collisions ()
+  (cond ((common-lisp:>= (right-border *player*)  (w *playfield*))
+	 (h-rebound *player*))
+	((common-lisp:<  (left-border *player*)   0)
+	 (h-rebound *player*))
+	((common-lisp:>= (bottom-border *player*) (h *playfield*))
+	 (v-rebound *player*))
+	((common-lisp:<  (top-border *player*)    0)
+	 (v-rebound *player*)))
+  (values))
+
+
 (defun game-loop-iteration (renderer)
   (repaint-playfield renderer)
   (move-objects)
+  (handle-collisions)
   (values))
 
 
