@@ -102,8 +102,8 @@ velocity vector."
 
 (defmacro check-direction (ks key axis fn)
   `(when (sdl2:scancode= (sdl2:scancode-value ,ks)
-                         (intern (format nil "scancode-~A" (string ,key)) "KEYWORD"))
-     (format nil "~A~%" '(setf (,axis *player*) (,fn (,axis *player*))))))
+                         (intern (format nil "SCANCODE-~A" (string ,key)) "KEYWORD"))
+     (setf (,axis *player*) (,fn (,axis *player*)))))
 
 
 (defun game ()
@@ -113,16 +113,10 @@ velocity vector."
         (initialize-game window)
         (sdl2:with-event-loop ()
           (:keydown (:keysym ks)
-;; this segment of code works fine!
-;                   (when (sdl2:scancode= (sdl2:scancode-value ks) ':scancode-w)
-;                     (setf (dy *player*) (1- (dy *player*))))
-;; this macro invokation, which *should* expand to the same thing as above,
-;; does not.  I don't know why.
                     (check-direction ks 'w dy 1-)
-;                   (check-direction ks 's dy 1+)
-;                   (check-direction ks 'a dx 1-)
-;                   (check-direction ks 'd dx 1+)
-          )
+                    (check-direction ks 's dy 1+)
+                    (check-direction ks 'a dx 1-)
+                    (check-direction ks 'd dx 1+))
           (:keyup (:keysym ks)
                   (when (sdl2:scancode= (sdl2:scancode-value ks) :scancode-escape)
                     (sdl2:push-event :quit)))
