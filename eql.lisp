@@ -17,6 +17,12 @@
 (ql:quickload :sdl2)
 
 
+;;; Game Configuration
+
+(defparameter *n-opponents* 4
+  "Number of on-screen opponents.")
+
+
 ;;; State of the game's universe.  You have a playfield, a player,
 ;;; a handful of opponents, and so forth.
 
@@ -26,31 +32,47 @@
 (defparameter *sparks* nil)
 
 
-;;; Players, opponents, and sparks all have on-screen behavior.
-;;; These generic functions specify what these behaviors are.
+;;; Visible objects are those things which the game player
+;;; can see on the screen.
+;;;
+;;; Note that because something is visible does not mean it
+;;; has a *location* on the screen.  The playfield and
+;;; score, for example, are fixed on the display.  They do not
+;;; move; ergo, they have no need for an origin coordinate.
+;;;
+;;; Visible objects, however, *do* have a width and height.
 
-(defgeneric paint-with-renderer (p r))
-(defgeneric move-object (p &key halfstep))
-(defgeneric border-collisions (p))
+(defclass visible ()
+  ((w :initarg :w :reader w :initform (error ":w required"))
+   (h :initarg :h :reader h :initform (error ":h required"))
+   (color :initarg :color :accessor color :initform '(255 255 255 255))))
+
+(defgeneric init-visible (p))
+(defgeneric paint-with-renderer (v r))
+
+(defmethod initialize-instance :after ((v visible) &key)
+  ; This hook is required so that constructors of VISIBLE
+  ; objects don't conflict.  Consider the OPPONENT class, which
+  ; is a subclass of PLAYER, and that is a subclass of VISIBLE.
+  ; The order of after-methods is OPPONENT, PLAYER, and then
+  ; VISIBLE.  So, any initialization needed by OPPONENT will be
+  ; undone by PLAYER's initialization code, etc.  
+  (init-visible v))
+
+
+;;; Particle objects can be repositioned on the screen and have
+;;; a velocity.  They optionally can collide with things.
+
+(defclass particle ()
+  ((dx :accessor dx :initform 0)
+   (dy :accessor dy :initform 0)
+   (left :initarg :left :accessor left)
+   (top :initarg :top :accessor top)))
+
+(defgeneric move-object (p))
+(defgeneric move-to (p x y))
 (defgeneric border-collision-consequence (p x y pf))
 (defgeneric handle-bumps (p1 p2))
-(defgeneric move-to (p x y))
-(defgeneric init (p))
-
-
-(defmethod move-object (p &key halfstep)
-  (declare (ignore p halfstep))
-  ; unless otherwise specified, objects are immobile.
-  (values))
-
-(defmethod move-to (p x y)
-  (declare (ignore p x y))
-  ; unless otherwise specified, objects are immobile.
-  (values))
-
-(defmethod border-collisions (p)
-  ; unless otherwise specified, objects have no borders.
-  (values))
 
 (defmethod handle-bumps (p1 p2)
   ; unless otherwise specified, it is an error to 'bump'
@@ -58,19 +80,34 @@
   ; or opponents.
   (error "should never be called."))
 
+(defmethod move-to ((p particle) x y)
+  (let ((x (floor x))
+        (y (floor y)))
+    (setf (left p) x)
+    (setf (top p) y))
+  (values))
+
+(defmethod move-object ((p particle))
+  (let ((new-x (+ (left p) (dx p)))
+        (new-y (+ (top p) (dy p))))
+    (move-to p new-x new-y))
+  (values))
+
 
 ;;; The playfield represents the most distantly visible object
 ;;; on the screen.  It is literally the field on which the
 ;;; other actors in the game reside upon.
 
-(defclass playfield ()
-  ((w :initarg :w :reader w :initform (error ":w required"))
-   (h :initarg :h :reader h :initform (error ":h required"))))
+(defclass playfield (visible)
+  ())
+
+; nothing to initialize.
+(defmethod init-visible ((p playfield)))
 
 (defmethod paint-with-renderer ((p playfield) r)
   (sdl2:set-render-draw-color r 0 0 0 255)
   (sdl2:render-clear r)
-  (sdl2:set-render-draw-color r 255 255 255 255)
+  (apply #'sdl2:set-render-draw-color (append (list r) (color p)))
   (sdl2:render-draw-rect r (sdl2:make-rect 0 0 (w p) (h p)))
   (values))
 
@@ -110,28 +147,20 @@
 (defun avg (a b)
   (floor (/ (+ a b) 2)))
 
-(defclass player ()
-  ((left :initarg :left :accessor left)
-   (top :initarg :top :accessor top)
-   (w :initform 16 :reader w)
-   (h :initform 16 :reader h)
-   (dx :accessor dx :initform 0)
-   (dy :accessor dy :initform 0)
-   (color :reader color :initform '(255 255 255 255))
+(defclass player (particle visible)
+   ((w :initform 16 :reader w) ; override visible
+   (h :initform 16 :reader h) ; override visible
    (pf :initarg :on-playfield :initform nil :reader playfield-of)))
 
 (defclass opponent (player)
-  ((color :accessor color)))
+  ())
 
-(defmethod initialize-instance :after ((p player) &key)
-  (init p))
-
-(defmethod init ((p player))
+(defmethod init-visible ((p player))
   (let ((pf (playfield-of p)))
     (move-to p (center-xy (w pf) (w p))
                (center-xy (h pf) (h p)))))
 
-(defmethod init ((o opponent))
+(defmethod init-visible ((o opponent))
   (setf (color o) (random-color))
   (setf (dx o) (- (random 7 *random-state*) 3))
   (setf (dy o) (- (random 7 *random-state*) 3))
@@ -150,58 +179,6 @@
     (sdl2:render-draw-line r right bottom left bottom)
     (sdl2:render-draw-line r left bottom left top)
     (values)))
-
-(defmethod move-to ((p player) x y)
-  (let ((x (floor x))
-        (y (floor y)))
-    (setf (left p) x)
-    (setf (top p) y))
-  (values))
-
-(defmethod move-object ((p player) &key halfstep)
-  (let* ((scale (if halfstep 0.5 1.0))
-         (new-x (* scale (+ (left p) (dx p))))
-         (new-y (* scale (+ (top p) (dy p)))))
-    (move-to p new-x new-y))
-  (values))
-
-(defmethod border-collisions ((p player))
-  ; let-block originally intended to help in debugging an issue.
-  ; However, in retrospect, this is better b/c it's faster to run.
-  (let ((player-right (right p))
-        (player-left (left p))
-        (player-top (top p))
-        (player-bottom (bottom p))
-        (field-left 0)
-        (field-right (w (playfield-of p)))
-        (field-top 0)
-        (field-bottom (h (playfield-of p)))
-        (pf (playfield-of p)))
-    (cond ((>= player-right field-right)
-           ; We've exceeded the right edge by N pixels.  Moving back
-           ; by N pixels puts us right on the edge, which isn't realistic.
-           ; Move by another N pixels to properly emulate the reflection
-           ; off the wall.
-           (decf (left p) (* 2 (- player-right field-right)))
-           (border-collision-consequence
-	     p player-right (avg player-top player-bottom) pf)
-           (h-rebound p))
-          ((< player-left field-left)
-           (incf (left p) (* 2 (- field-left player-left)))
-           (border-collision-consequence
-	     p player-left (avg player-top player-bottom) pf)
-           (h-rebound p))
-          ((>= player-bottom field-bottom)
-           (decf (top p) (* 2 (- player-bottom field-bottom)))
-           (border-collision-consequence
-	     p (avg player-left player-right) player-bottom pf)
-           (v-rebound p))
-          ((< player-top field-top)
-           (incf (top p) (* 2 (- field-top player-top)))
-           (border-collision-consequence
-	     p (avg player-left player-right) player-top pf)
-           (v-rebound p))))
-  (values))
 
 (defmethod border-collision-consequence ((p player) x y pf)
   (declare (ignore p))
@@ -242,15 +219,12 @@ the coordinates of the rectangle returned will be (partially) backwards."
 ;;; they also have a time-to-live aspect.  Sparks fizzle out
 ;;; after a certain number of game loop iterations.
 
-(defclass spark (player)
-  ((color :accessor color)
-   (left :initarg :left :accessor left :initform (error "initarg required"))
-   (top :initarg :top :accessor top :initform (error "initarg required"))
-   (w :reader w :initform 1)
-   (h :reader h :initform 1)
+(defclass spark (particle visible)
+  ((w :reader w :initform 1) ; override visible
+   (h :reader h :initform 1) ; override visible
    (ttl :accessor ttl)))
 
-(defmethod init ((s spark))
+(defmethod init-visible ((s spark))
   (setf (color s) (random-color :range 256 :offset 0))
   (setf (dx s) (- (random 15 *random-state*) 7))
   (setf (dy s) (- (random 15 *random-state*) 7))
@@ -262,11 +236,11 @@ the coordinates of the rectangle returned will be (partially) backwards."
   (values))
 
 (defun make-sparks (x y pf)
-  (dotimes (unused (random 50 *random-state*))
+  (dotimes (i (random 50 *random-state*))
+    (declare (ignore i))
     (push (make-instance 'spark
                          :left (floor x)
-                         :top (floor y)
-                         :on-playfield pf)
+                         :top (floor y))
           *sparks*)))
 
 (defmethod border-collision-consequence ((s spark) x y pf)
@@ -295,10 +269,46 @@ velocity vector."
   (values))
 
 
+(defun border-collisions (p pf)
+  (let ((player-left (left p))
+        (player-top (top p))
+        (player-right (right p))
+        (player-bottom (bottom p))
+        (field-left 0)
+        (field-top 0)
+        (field-right (w pf))
+        (field-bottom (h pf)))
+    (cond ((>= player-right field-right)
+           ; We've exceeded the right edge by N pixels.  Moving back
+           ; by N pixels puts us right on the edge, which isn't realistic.
+           ; Move by another N pixels to properly emulate the reflection
+           ; off the wall.
+           (decf (left p) (* 2 (- player-right field-right)))
+           (border-collision-consequence
+             p player-right (avg player-top player-bottom) pf)
+           (h-rebound p))
+          ((< player-left field-left)
+           (incf (left p) (* 2 (- field-left player-left)))
+           (border-collision-consequence
+             p player-left (avg player-top player-bottom) pf)
+           (h-rebound p))
+          ((>= player-bottom field-bottom)
+           (decf (top p) (* 2 (- player-bottom field-bottom)))
+           (border-collision-consequence
+             p (avg player-left player-right) player-bottom pf)
+           (v-rebound p))
+          ((< player-top field-top)
+           (incf (top p) (* 2 (- field-top player-top)))
+           (border-collision-consequence
+             p (avg player-left player-right) player-top pf)
+           (v-rebound p))))
+  (values))
+
 (defun handle-all-collisions ()
   (let* ((vehicles (append (list *player*) *opponents*))
          (everything (append vehicles *sparks*)))
-    (loop for object in everything do (border-collisions object))
+    (loop for object in everything
+          do (border-collisions object *playfield*))
     (loop for x in vehicles
           do (loop for y in *opponents*
                    do (handle-bumps x y))))
@@ -324,7 +334,7 @@ velocity vector."
   (multiple-value-bind (w h) (sdl2:get-window-size window)
     (setf *playfield* (make-instance 'playfield :w w :h h)))
   (setf *player* (make-instance 'player :on-playfield *playfield*))
-  (dotimes (unused 4)
+  (dotimes (unused *n-opponents*)
     (push (make-instance 'opponent :on-playfield *playfield*) *opponents*))
   (values))
 
