@@ -22,6 +22,9 @@
 (defparameter *n-opponents* 4
   "Number of on-screen opponents.")
 
+(defparameter *acceleration* 1/2
+  "Acceration of a player when WASD is pressed.")
+
 
 ;;; State of the game's universe.  You have a playfield, a player,
 ;;; a handful of opponents, and so forth.
@@ -94,6 +97,35 @@
   (values))
 
 
+;;; A controllable object can be directed somehow by an
+;;; intelligence, natural or artificial.  Controllable
+;;; entities implies that they are particle-like somehow.
+
+(defclass controllable ()
+  ((force :accessor force :initform nil)
+   (ax :accessor ax :initform 0.0)
+   (ay :accessor ay :initform 0.0)))
+
+(defun accelerate (c direction)
+  (setf (force c) (adjoin direction (force c))))
+
+(defun decelerate (c direction)
+  (setf (force c) (remove direction (force c))))
+
+(defgeneric jerk (c))
+
+(defmethod jerk ((c controllable))
+  "Apply a change in acceleration."
+  (mapcar #'(lambda (dir)
+              (cond
+                ((eq dir :up) (decf (ay c) *acceleration*))
+                ((eq dir :down) (incf (ay c) *acceleration*))
+                ((eq dir :left) (decf (ax c) *acceleration*))
+                ((eq dir :right) (incf (ax c) *acceleration*))))
+          (force c))
+  (values))
+
+
 ;;; The playfield represents the most distantly visible object
 ;;; on the screen.  It is literally the field on which the
 ;;; other actors in the game reside upon.
@@ -147,7 +179,7 @@
 (defun avg (a b)
   (floor (/ (+ a b) 2)))
 
-(defclass player (particle visible)
+(defclass player (controllable particle visible)
    ((w :initform 16 :reader w) ; override visible
    (h :initform 16 :reader h) ; override visible
    (pf :initarg :on-playfield :initform nil :reader playfield-of)))
@@ -212,6 +244,22 @@ the coordinates of the rectangle returned will be (partially) backwards."
 )))
   (values))
 
+(defmethod jerk :after ((p player))
+  "Apply a change in acceleration."
+  (when (> (ax p) 0.9)
+    (incf (dx p))
+    (setf (ax p) 0))
+  (when (< (ax p) -0.9)
+    (decf (dx p))
+    (setf (ax p) 0))
+  (when (> (ay p) 0.9)
+    (incf (dy p))
+    (setf (ay p) 0))
+  (when (< (ay p) -0.9)
+    (decf (dy p))
+    (setf (ay p) 0))
+  (values))
+
 
 ;;; Sparks are single-pixel, brightly-colored objects which
 ;;; are generated whenever there's a collision between two
@@ -258,6 +306,13 @@ the coordinates of the rectangle returned will be (partially) backwards."
                               *opponents*
                               *sparks*)
         do (paint-with-renderer object renderer))
+  (values))
+
+
+(defun apply-jerks ()
+  "Apply changes in acceleration ('jerk') to all controllable objects."
+  (loop for object in (append (list *player*) *opponents*)
+	do (jerk object))
   (values))
 
 
@@ -324,6 +379,7 @@ velocity vector."
 
 (defun game-loop-iteration (renderer)
   (repaint-playfield renderer)
+  (apply-jerks)
   (move-objects)
   (handle-all-collisions)
   (reap-sparks)
@@ -339,11 +395,17 @@ velocity vector."
   (values))
 
 
-(defmacro check-direction (ks key axis fn)
+(defmacro push-direction (ks key dir)
   `(when (sdl2:scancode= (sdl2:scancode-value ,ks)
                          (intern (format nil "SCANCODE-~A" (string ,key))
                                  "KEYWORD"))
-     (setf (,axis *player*) (,fn (,axis *player*)))))
+     (accelerate *player* ,dir)))
+
+(defmacro stop-direction (ks key dir)
+  `(when (sdl2:scancode= (sdl2:scancode-value ,ks)
+                         (intern (format nil "SCANCODE-~A" (string ,key))
+                                 "KEYWORD"))
+     (decelerate *player* ,dir)))
 
 
 (defun game ()
@@ -353,11 +415,15 @@ velocity vector."
         (initialize-game window)
         (sdl2:with-event-loop ()
           (:keydown (:keysym ks)
-                    (check-direction ks 'w dy 1-)
-                    (check-direction ks 's dy 1+)
-                    (check-direction ks 'a dx 1-)
-                    (check-direction ks 'd dx 1+))
+                    (push-direction ks 'w :up)
+                    (push-direction ks 's :down)
+                    (push-direction ks 'a :left)
+                    (push-direction ks 'd :right))
           (:keyup (:keysym ks)
+                  (stop-direction ks 'w :up)
+                  (stop-direction ks 's :down)
+                  (stop-direction ks 'a :left)
+                  (stop-direction ks 'd :right)
                   (when (sdl2:scancode= (sdl2:scancode-value ks)
                                         :scancode-escape)
                     (sdl2:push-event :quit)))
