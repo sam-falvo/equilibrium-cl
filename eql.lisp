@@ -371,6 +371,11 @@ velocity vector."
 
 
 (defun reap-sparks ()
+  ;; For some reason, this procedure doesn't seem to delete every spark.
+  ;; I do not know why this should be the case; is this a bug in SBCL's
+  ;; implementation or libraries?  But, when MAKE-SPARKS is called at a
+  ;; later time, it allows older sparks to be reaped as expected.
+  ;; At least it isn't a fatal bug; more cute than anything.
   (delete-if #'(lambda (s)
                  (decf (ttl s))
                  (<= (ttl s) 0))
